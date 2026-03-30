@@ -1,0 +1,11 @@
+# Dependencies
+node_modules/
+
+# Logs
+*.log
+
+# User settings (may contain API keys)
+data.json
+
+# Build artifacts (keep main.js for Obsidian plugin distribution)
+*.js.map

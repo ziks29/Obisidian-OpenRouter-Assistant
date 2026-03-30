@@ -1,0 +1,10 @@
+{
+  "id": "rag-openrouter-notes",
+  "name": "RAG OpenRouter Notes",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Ask questions against your notes using local retrieval and OpenRouter.",
+  "author": "Your Name",
+  "authorUrl": "",
+  "isDesktopOnly": false
+}
