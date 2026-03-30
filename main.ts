@@ -13,7 +13,7 @@ import {
   requestUrl
 } from "obsidian";
 
-interface RagOpenRouterSettings {
+interface OpenRouterAssistantSettings {
   openRouterApiKey: string;
   model: string;
   maxChunks: number;
@@ -89,7 +89,7 @@ interface CitationLink {
   file: TFile;
 }
 
-const DEFAULT_SETTINGS: RagOpenRouterSettings = {
+const DEFAULT_SETTINGS: OpenRouterAssistantSettings = {
   openRouterApiKey: "",
   model: "openai/gpt-4o-mini",
   maxChunks: 6,
@@ -102,7 +102,7 @@ const DEFAULT_SETTINGS: RagOpenRouterSettings = {
 const RAG_CHAT_VIEW_TYPE = "rag-openrouter-chat-sidebar";
 
 export default class RagOpenRouterPlugin extends Plugin {
-  settings: RagOpenRouterSettings;
+  settings: OpenRouterAssistantSettings;
   noteIndex: NoteChunk[] = [];
   private modelCache: OpenRouterModel[] = [];
   private modelCacheUpdatedAt = 0;

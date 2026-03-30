@@ -1,6 +1,6 @@
-# RAG OpenRouter Notes (Obsidian Plugin)
+# OpenRouter Assistant (Obsidian Plugin)
 
-This plugin reads your Markdown notes, retrieves relevant chunks for a question, and sends context to OpenRouter.
+Chat with your vault using OpenRouter. Reads your Markdown notes, retrieves relevant chunks for context, and generates answers powered by your choice of AI models.
 
 ## Features
 
@@ -43,17 +43,17 @@ This plugin reads your Markdown notes, retrieves relevant chunks for a question,
 
 ## Usage
 
-- Run command: `RAG OpenRouter Notes: Ask Question With Vault Context`
-- Type your question
-- Plugin writes the answer into a new note in your vault
-- Run command: `RAG OpenRouter Notes: Chat With Current Note`
-- Opens chat in the right sidebar focused on the active markdown note
-- Use `Save Chat` in the sidebar chat to export transcript to a new markdown file
-- Run command: `RAG OpenRouter Notes: Agent Chat With Vault`
-- Opens vault agent chat in the right sidebar
-- When assistant returns `agent-actions`, review and approve before applying
-- Use slash commands in the input for fast workflows (`/help` shows all commands)
-- Drag and drop links like `obsidian://open?vault=...&file=...` into input to auto-insert note references
+- Run command: `Ask Question With Vault Context`
+  - Type your question and the plugin retrieves relevant notes to answer it
+  - Answer is saved to a new note in your vault with citations
+- Run command: `Chat With Current Note`
+  - Opens multi-turn chat focused on the active markdown note
+  - Use `Save Chat` to export transcript as a markdown file
+- Run command: `Agent Chat With Vault`
+  - Opens vault-wide agent chat in the right sidebar
+  - Agent can create/modify notes (with approval before execution)
+  - Use `/help` in chat to see all slash commands
+- Drag and drop note links (e.g., `obsidian://open?vault=...&file=...`) into chat to auto-reference notes
 
 ## Security
 
