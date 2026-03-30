@@ -27,6 +27,7 @@ interface NoteChunk {
   filePath: string;
   chunkText: string;
   tokens: string[];
+  termFrequencies: Record<string, number>;
 }
 
 interface OpenRouterModel {
@@ -104,6 +105,8 @@ const RAG_CHAT_VIEW_TYPE = "rag-openrouter-chat-sidebar";
 export default class RagOpenRouterPlugin extends Plugin {
   settings: OpenRouterAssistantSettings;
   noteIndex: NoteChunk[] = [];
+  documentFrequencies: Record<string, number> = {};
+  avgChunkLength: number = 0;
   private modelCache: OpenRouterModel[] = [];
   private modelCacheUpdatedAt = 0;
 
@@ -280,15 +283,42 @@ export default class RagOpenRouterPlugin extends Plugin {
     new Notice(`Answer created: ${createdFile.path}`);
   }
 
+  private stem(word: string): string {
+    let w = word.toLowerCase();
+    if (w.length < 3) return w;
+
+    if (w.endsWith('ies')) w = w.slice(0, -3) + 'y';
+    else if (w.endsWith('sses')) w = w.slice(0, -2);
+    else if (w.endsWith('s') && !w.endsWith('ss')) w = w.slice(0, -1);
+
+    if (w.endsWith('eed')) {
+        if (w.length > 4) w = w.slice(0, -1);
+    } else if ((w.endsWith('ed') || w.endsWith('ing')) && /[aeiouy]/.test(w.slice(0, -2))) {
+        w = w.endsWith('ed') ? w.slice(0, -2) : w.slice(0, -3);
+        if (w.endsWith('at') || w.endsWith('bl') || w.endsWith('iz')) {
+            w += 'e';
+        } else if (/(bb|dd|ff|gg|mm|nn|pp|rr|tt)$/.test(w)) {
+            w = w.slice(0, -1);
+        }
+    }
+
+    if (w.endsWith('y') && /[aeiouy]/.test(w.slice(0, -1))) {
+        w = w.slice(0, -1) + 'i';
+    }
+
+    return w;
+  }
+
   private tokenize(input: string): string[] {
     return input
       .toLowerCase()
       .replace(/[^a-z0-9\s]/g, " ")
       .split(/\s+/)
-      .filter((t) => t.length > 2);
+      .filter((t) => t.length > 2)
+      .map((t) => this.stem(t));
   }
 
-  private splitIntoChunks(text: string, chunkSize: number): string[] {
+  private splitIntoChunks(text: string, chunkSize: number, overlapSize: number = 100): string[] {
     const chunks: string[] = [];
     const paragraphs = text
       .split(/\n{2,}/)
@@ -308,9 +338,12 @@ export default class RagOpenRouterPlugin extends Plugin {
       }
 
       if (paragraph.length <= chunkSize) {
-        current = paragraph;
+        const overlapStr = current ? current.slice(Math.max(0, current.length - overlapSize)) : "";
+        const spaceIdx = overlapStr.indexOf(' ');
+        const cleanOverlap = spaceIdx !== -1 ? overlapStr.slice(spaceIdx + 1) : overlapStr;
+        current = cleanOverlap ? `...${cleanOverlap}\n\n${paragraph}` : paragraph;
       } else {
-        const hardSplit = this.hardSplit(paragraph, chunkSize);
+        const hardSplit = this.hardSplit(paragraph, chunkSize, overlapSize);
         chunks.push(...hardSplit.slice(0, -1));
         current = hardSplit[hardSplit.length - 1];
       }
@@ -323,13 +356,17 @@ export default class RagOpenRouterPlugin extends Plugin {
     return chunks;
   }
 
-  private hardSplit(text: string, chunkSize: number): string[] {
+  private hardSplit(text: string, chunkSize: number, overlapSize: number = 100): string[] {
     const result: string[] = [];
     let start = 0;
 
     while (start < text.length) {
-      result.push(text.slice(start, start + chunkSize));
-      start += chunkSize;
+      const end = start + chunkSize;
+      result.push(text.slice(start, end));
+      start += chunkSize - overlapSize;
+      if (start >= text.length || chunkSize <= overlapSize) {
+        break;
+      }
     }
 
     return result;
@@ -338,11 +375,13 @@ export default class RagOpenRouterPlugin extends Plugin {
   async rebuildIndex(): Promise<void> {
     const files = this.app.vault.getMarkdownFiles();
     const chunks: NoteChunk[] = [];
+    const df: Record<string, number> = {};
+    let totalTokens = 0;
 
     for (const file of files) {
       try {
         const content = await this.app.vault.cachedRead(file);
-        const split = this.splitIntoChunks(content, this.settings.chunkSize);
+        const split = this.splitIntoChunks(content, this.settings.chunkSize, 100);
 
         for (const chunkText of split) {
           const tokens = this.tokenize(chunkText);
@@ -350,10 +389,22 @@ export default class RagOpenRouterPlugin extends Plugin {
             continue;
           }
 
+          const termFrequencies: Record<string, number> = {};
+          for (const token of tokens) {
+             termFrequencies[token] = (termFrequencies[token] || 0) + 1;
+          }
+
+          for (const token of Object.keys(termFrequencies)) {
+             df[token] = (df[token] || 0) + 1;
+          }
+
+          totalTokens += tokens.length;
+
           chunks.push({
             filePath: file.path,
             chunkText,
-            tokens
+            tokens,
+            termFrequencies
           });
         }
       } catch (error) {
@@ -362,7 +413,34 @@ export default class RagOpenRouterPlugin extends Plugin {
     }
 
     this.noteIndex = chunks;
+    this.documentFrequencies = df;
+    this.avgChunkLength = chunks.length > 0 ? totalTokens / chunks.length : 0;
     new Notice(`Indexed ${files.length} notes into ${chunks.length} chunks.`);
+  }
+
+  private calculateBM25Score(chunk: NoteChunk, queryTokens: string[]): number {
+    const k1 = 1.2;
+    const b = 0.75;
+    const N = this.noteIndex.length;
+    let score = 0;
+
+    for (const token of queryTokens) {
+      if (!chunk.termFrequencies[token]) {
+        continue;
+      }
+
+      const n = this.documentFrequencies[token] || 0;
+      const idf = Math.log((N - n + 0.5) / (n + 0.5) + 1);
+
+      const f = chunk.termFrequencies[token];
+      const dl = chunk.tokens.length;
+      const avgdl = this.avgChunkLength || 1;
+
+      const tf = (f * (k1 + 1)) / (f + k1 * (1 - b + b * (dl / avgdl)));
+      score += idf * tf;
+    }
+
+    return score;
   }
 
   private retrieveRelevantChunks(question: string): NoteChunk[] {
@@ -373,18 +451,8 @@ export default class RagOpenRouterPlugin extends Plugin {
 
     const scored = this.noteIndex
       .map((chunk) => {
-        const tokenSet = new Set(chunk.tokens);
-        let score = 0;
-
-        for (const token of queryTokens) {
-          if (tokenSet.has(token)) {
-            score += 1;
-          }
-        }
-
-        // Favor denser matches by normalizing for chunk length.
-        const normalizedScore = score / Math.sqrt(chunk.tokens.length);
-        return { chunk, score: normalizedScore };
+        const score = this.calculateBM25Score(chunk, queryTokens);
+        return { chunk, score };
       })
       .filter((x) => x.score > 0)
       .sort((a, b) => b.score - a.score)
@@ -403,17 +471,8 @@ export default class RagOpenRouterPlugin extends Plugin {
     const scored = this.noteIndex
       .filter((chunk) => chunk.filePath === filePath)
       .map((chunk) => {
-        const tokenSet = new Set(chunk.tokens);
-        let score = 0;
-
-        for (const token of queryTokens) {
-          if (tokenSet.has(token)) {
-            score += 1;
-          }
-        }
-
-        const normalizedScore = score / Math.sqrt(chunk.tokens.length);
-        return { chunk, score: normalizedScore };
+        const score = this.calculateBM25Score(chunk, queryTokens);
+        return { chunk, score };
       })
       .filter((x) => x.score > 0)
       .sort((a, b) => b.score - a.score)
